@@ -1,0 +1,264 @@
+Sub subGetEDWDataForEachDayBeyondSQLPull() 'Pull data from EDW for pharm for each day beyond cycle date
+
+'check to see if date value was entered
+If IsNull(Forms![Main Form]!txtCycleDate.Value) Then
+    MsgBox "Please enter a date value"
+    End
+End If
+
+Dim dblDaysToPull As Double
+
+'upload linked xls file to tablespace
+subDropLocalTable "BALANCE_REPORT_UPLOAD"
+CurrentDb.Execute "qryMakeBALANCE_REPORT_UPLOAD"
+CurrentDb.Execute "qryAddLeadingZeros" 'fix Leading Zeros in text field
+funStandardUpload ("BALANCE_REPORT_UPLOAD")
+
+'Update date in EDW query then run 12 times. Create table if it doesn't exist, append otherwise.
+For c = 1 To 12
+    'Call ChangeQueryDate("ARGData", Format(Forms![Main Form]!txtCycleDate.Value + c, "dd-mmm-yyyy"), "WHERE t.process_date = '")
+    'Call ChangeQueryDate("NSPData", Format(Forms![Main Form]!txtCycleDate.Value + c, "dd-mmm-yyyy"), "WHERE t.process_date = '")
+
+    Call ChangeQueryDate("qryGetEDWDailyData", Format(Forms![Main Form]!txtCycleDate.Value + c, "dd-mmm-yyyy"), "WHERE t.process_date = '")
+
+    If IsNull(DLookup("Type", "MSYSObjects", "Name='tblNext10Days'")) Then 'Create query if it does not exist
+        DoCmd.OpenQuery "qryMaketblNext10Days", , acReadOnly
+    Else
+        DoCmd.OpenQuery "qryAppendtblNext10Days", , acReadOnly
+    End If
+Next c
+
+'create tblOBRWithNext10Days
+DoCmd.OpenQuery "qryMaketblOBRWithNext10Days", , acReadOnly
+
+
+'Insert each day into tblOBRWithNext10Days table
+For r = 1 To 12
+    Dim qryAppendDays As String
+    qryAppendDays = "UPDATE tblOBRWithNext10Days INNER JOIN tblNext10Days ON tblOBRWithNext10Days.[STR_PHARM_ID] = tblNext10Days.STR_PHARM_ID SET tblOBRWithNext10Days.[Day " & r & "] = [tblNext10Days].[SumOfPHAR_TOTAL_PAID_AMT] WHERE (((tblNext10Days.PROCESS_DATE)=#" & Format(Forms![Main Form]!txtCycleDate.Value + r, "mm/dd/yyyy") & "#));"
+
+    CurrentDb.Execute qryAppendDays
+Next r
+
+'Update with pharm data
+subDropLocalTable "PHARMBRIDGE"
+subDropLocalTable "tblPharmData"
+CurrentDb.Execute "qryMaketblPharmIDBridge"
+funStandardUpload ("PHARMBRIDGE")
+CurrentDb.Execute "qryMakeShowPharmData"
+CurrentDb.Execute "qryUpdatePharmData"
+funDropEDWTable ("PHARMBRIDGE")
+
+'Sum Days
+CurrentDb.Execute "qryUpdateSum"
+
+'Update %$'s by years
+Call subDropLocalTable("tblYearMatrix")
+CurrentDb.Execute "qryMaketblYearMatrix"
+
+Call subDropLocalTable("tblBalancePayGrByYear")
+CurrentDb.Execute "qryPayGroupByYear"
+
+CurrentDb.Execute "qryUpdateBalancePayGr - 2014"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2016"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2017"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2018"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2019"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2020"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2021"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2022"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2023"
+CurrentDb.Execute "qryUpdateBalancePayGr - 2024"
+CurrentDb.Execute "qryUpdateBalancePayGr - UptateTotal"
+
+Call subDropLocalTable("tblYearlyPercentages")
+CurrentDb.Execute "qryMaketblYearlyPercentages"
+
+CurrentDb.Execute "qryUpdateYearlyPercentages"
+
+'Update Overpayment Data
+CurrentDb.Execute "qryUpdateOverpaymentData"
+
+'Update AGE
+CurrentDb.Execute "qryUpdateAge"
+
+'Update Last Cycles
+CurrentDb.Execute "qryLastCycles"
+
+'Update Claim Types
+Call subDropLocalTable("tblBalType")
+CurrentDb.Execute "qryMaketblBalType"
+CurrentDb.Execute "qryBalTypes - Audit Adjustments"
+CurrentDb.Execute "qryBalTypes - Audit Denial"
+CurrentDb.Execute "qryBalTypes - Outstanding LIA Claims"
+CurrentDb.Execute "qryBalTypes - Pharmacy Reversials"
+CurrentDb.Execute "qryBalTypes - Pharmacy Rework"
+CurrentDb.Execute "qryBalTypes - Totals"
+
+'Update Type Percentages
+CurrentDb.Execute "qryUpdateTypePercentages"
+
+'Delete Blanks
+CurrentDb.Execute "qryDeleteBlanks"
+
+'Drop uploaded table from tablespace
+funDropEDWTable ("BALANCE_REPORT_UPLOAD")
+
+'*******************************************************
+
+'Export "qryShowResults"
+Dim filepath As String
+Dim FileName As String
+
+'****OLD METHOD -- Will switch when/if report is finalized
+filepath = "Q:\Pharmacy Corporate\Finance\Argus\Pharmacy Financial Recoveries\"
+FileName = Format(Date, "YYYYMMDD") & " Outstanding Balance Report.xls"
+
+DoCmd.TransferSpreadsheet acExport, acSpreadsheetTypeExcel12, "OutstandingBalReport", filepath & FileName, True
+
+'Format exported data
+Dim MySheetPath As String: MySheetPath = filepath & FileName
+
+Dim XL As Object
+Set XL = CreateObject("Excel.Application")
+
+With XL
+    .Application.Visible = True
+    .workbooks.Open MySheetPath
+
+End With
+
+Set xlBook = GetObject(MySheetPath)
+Set xlsheet1 = xlBook.Worksheets(1)
+
+x = xlsheet1.UsedRange.rows.Count
+
+With xlsheet1
+    .range("A1").Select
+
+    'format header
+        .range("A1:BI1").Font.Bold = True
+        .range("A1:BI1").Font.Name = "Tahoma"
+        .range("A1:BI1").Font.Size = 11
+
+        'blue background, white text
+        .range("A1:J1,AR1:AU1").Interior.Color = RGB(70, 130, 180)
+        .range("A1:J1,AR1:AU1").Font.Color = vbWhite
+
+        'goldish background
+        .range("K1").Interior.Color = RGB(196, 189, 151)
+        .range("K1").Font.Color = vbWhite
+
+        'yellow background
+        .range("L1:U1,AE1:AQ1").Interior.Color = RGB(255, 255, 0)
+
+        'gray background
+        .range("V1").Interior.Color = RGB(242, 242, 242)
+
+        'orange background
+        .range("W1,Y1").Interior.Color = RGB(255, 192, 0)
+
+        'burnt sienna background
+        .range("X1,Z1").Interior.Color = RGB(256, 107, 10)
+
+        'green background
+        .range("AA1:AD1,AV1:BA1").Interior.Color = RGB(146, 208, 80)
+        
+        'purple background
+        .range("BB1:BJ1").Interior.Color = RGB(177, 160, 199)
+
+        'data format
+        .range("A2:ZZ" & x).Font.Name = "Arial"
+        .range("A2:ZZ" & x).Font.Size = 10
+
+    'format date
+    .range("C2:C" & x & ",D2:D" & x).NumberFormat = "m/d/yyyy;@"
+    'format numbers with .00
+    .range("G2:K" & x & ",AE2:BI" & x).NumberFormat = "#,##0.00"
+    'format non dec numbers
+    .range("V2:V" & x).NumberFormat = "#,##0"
+    'format dollars
+    .range("G2:K2,AE2:BJ2").NumberFormat = "$#,##0.00"
+    'format percentages
+    .range("L2:U" & x & ",W2:AD" & x).NumberFormat = "0.00%"
+    .rows(1).RowHeight = 30
+    .range("A1:ZZ" & x).Columns.Autofit
+
+    .Columns("A").ColumnWidth = .Columns("A").ColumnWidth + 3
+    .Columns("B").ColumnWidth = .Columns("B").ColumnWidth + 3
+    .Columns("C").ColumnWidth = .Columns("C").ColumnWidth + 3
+    .Columns("D").ColumnWidth = .Columns("D").ColumnWidth + 3
+    .Columns("E").ColumnWidth = .Columns("E").ColumnWidth + 3
+    .Columns("F").ColumnWidth = .Columns("F").ColumnWidth + 3
+    .Columns("G").ColumnWidth = .Columns("G").ColumnWidth + 3
+    .Columns("H").ColumnWidth = .Columns("H").ColumnWidth + 3
+    .Columns("I").ColumnWidth = .Columns("I").ColumnWidth + 3
+    .Columns("J").ColumnWidth = .Columns("J").ColumnWidth + 3
+    .Columns("K").ColumnWidth = .Columns("K").ColumnWidth + 3
+    .Columns("L").ColumnWidth = .Columns("L").ColumnWidth + 3
+    .Columns("M").ColumnWidth = .Columns("M").ColumnWidth + 3
+    .Columns("N").ColumnWidth = .Columns("N").ColumnWidth + 3
+    .Columns("O").ColumnWidth = .Columns("O").ColumnWidth + 3
+    .Columns("P").ColumnWidth = .Columns("P").ColumnWidth + 3
+    .Columns("Q").ColumnWidth = .Columns("Q").ColumnWidth + 3
+    .Columns("R").ColumnWidth = .Columns("R").ColumnWidth + 3
+    .Columns("S").ColumnWidth = .Columns("S").ColumnWidth + 3
+    .Columns("T").ColumnWidth = .Columns("T").ColumnWidth + 3
+    .Columns("U").ColumnWidth = .Columns("U").ColumnWidth + 3
+    .Columns("V").ColumnWidth = .Columns("V").ColumnWidth + 3
+    .Columns("W").ColumnWidth = .Columns("W").ColumnWidth + 3
+    .Columns("X").ColumnWidth = .Columns("X").ColumnWidth + 3
+    .Columns("Y").ColumnWidth = .Columns("Y").ColumnWidth + 3
+    .Columns("Z").ColumnWidth = .Columns("Z").ColumnWidth + 3
+    .Columns("AA").ColumnWidth = .Columns("AA").ColumnWidth + 3
+    .Columns("AB").ColumnWidth = .Columns("AB").ColumnWidth + 3
+    .Columns("AC").ColumnWidth = .Columns("AC").ColumnWidth + 3
+    .Columns("AD").ColumnWidth = .Columns("AD").ColumnWidth + 3
+    .Columns("AE").ColumnWidth = .Columns("AE").ColumnWidth + 3
+    .Columns("AF").ColumnWidth = .Columns("AF").ColumnWidth + 3
+    .Columns("AG").ColumnWidth = .Columns("AG").ColumnWidth + 3
+    .Columns("AH").ColumnWidth = .Columns("AH").ColumnWidth + 3
+    .Columns("AI").ColumnWidth = .Columns("AI").ColumnWidth + 3
+    .Columns("AJ").ColumnWidth = .Columns("AJ").ColumnWidth + 3
+    .Columns("AK").ColumnWidth = .Columns("AK").ColumnWidth + 3
+    .Columns("AL").ColumnWidth = .Columns("AL").ColumnWidth + 3
+    .Columns("AM").ColumnWidth = .Columns("AM").ColumnWidth + 3
+    .Columns("AN").ColumnWidth = .Columns("AN").ColumnWidth + 3
+    .Columns("AO").ColumnWidth = .Columns("AO").ColumnWidth + 3
+    .Columns("AP").ColumnWidth = .Columns("AP").ColumnWidth + 3
+    .Columns("AQ").ColumnWidth = .Columns("AQ").ColumnWidth + 3
+    .Columns("AR").ColumnWidth = .Columns("AR").ColumnWidth + 3
+    .Columns("AS").ColumnWidth = .Columns("AS").ColumnWidth + 3
+    .Columns("AT").ColumnWidth = .Columns("AT").ColumnWidth + 3
+    .Columns("AU").ColumnWidth = .Columns("AU").ColumnWidth + 3
+    .Columns("AV").ColumnWidth = .Columns("AV").ColumnWidth + 3
+    .Columns("AW").ColumnWidth = .Columns("AW").ColumnWidth + 3
+    .Columns("AX").ColumnWidth = .Columns("AX").ColumnWidth + 3
+    .Columns("AY").ColumnWidth = .Columns("AY").ColumnWidth + 3
+    .Columns("AZ").ColumnWidth = .Columns("AZ").ColumnWidth + 3
+    .Columns("BA").ColumnWidth = .Columns("BA").ColumnWidth + 3
+    .Columns("BB").ColumnWidth = .Columns("BB").ColumnWidth + 3
+    .Columns("BC").ColumnWidth = .Columns("BC").ColumnWidth + 3
+    .Columns("BD").ColumnWidth = .Columns("BD").ColumnWidth + 3
+    .Columns("BE").ColumnWidth = .Columns("BE").ColumnWidth + 3
+    .Columns("BF").ColumnWidth = .Columns("BF").ColumnWidth + 3
+    .Columns("BG").ColumnWidth = .Columns("BG").ColumnWidth + 3
+    .Columns("BH").ColumnWidth = .Columns("BH").ColumnWidth + 3
+    .Columns("BI").ColumnWidth = .Columns("BI").ColumnWidth + 3
+    .Columns("BJ").ColumnWidth = .Columns("BJ").ColumnWidth + 3
+
+    .rows("1:1").entirerow.insert
+    .range("A1").Value = "Pharmacy Outstanding Balance Report - " & Format(Date, "mm/dd/yyyy")
+    .range("A1").Font.Name = "Tahoma"
+    .range("A1").Font.Size = 18
+    .range("A1").Font.Color = RGB(70, 130, 180)
+    .range("A1:BJ1").Font.Bold = True
+    .range("A1:J1").Merge
+    .range("A2:BJ" & x).AutoFilter
+
+    For c = 1 To 12
+        .cells(1, 30 + c).Value = Format(Forms![Main Form]!txtCycleDate.Value + c, "dd-mmm-yyyy")
+    Next c
+
+End With
+End Sub
