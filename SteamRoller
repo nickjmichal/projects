@@ -1,0 +1,350 @@
+import sys
+import RPi.GPIO as GPIO
+import time
+import math
+import os
+import datetime
+import random
+from time import sleep
+
+#Rotary Switch
+class RotarySwitch:
+    # Status settings
+    CLEAR = 0
+    VALUE1 = 0 # should all be zero?
+    VALUE2 = 0
+    VALUE3 = 0
+    VALUE4  = 0
+    switch1 = None
+    switch2 = None
+    switch3 = None
+    switch4 = None
+
+    def __init__(self, switch1,switch2,switch3,switch4,callback):
+        self.switch1 = switch1
+        self.switch2 = switch2
+        self.switch3 = switch3
+        self.switch4 = switch4
+        self.callback = callback
+
+        # Set up switch lines
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        
+        #button
+        GPIO.setup(4, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+        if self.switch1 > 0:
+            GPIO.setup(self.switch1, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        if self.switch2 > 0:
+            GPIO.setup(self.switch2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        if self.switch3 > 0:
+            GPIO.setup(self.switch3, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        if self.switch4 > 0:
+            GPIO.setup(self.switch4, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+        # Add event detection to the GPIO inputs
+        switch = 0
+        try:
+            switch = self.switch1
+            if self.switch1 > 0:
+                GPIO.add_event_detect(self.switch1, GPIO.FALLING, \
+                     callback=self.callback, bouncetime=100)
+            switch = self.switch2
+            if self.switch2 > 0:
+                GPIO.add_event_detect(self.switch2, GPIO.FALLING, \
+                     callback=self.callback, bouncetime=100)
+            switch = self.switch3
+            if self.switch3 > 0:
+                GPIO.add_event_detect(self.switch3, GPIO.FALLING, \
+                     callback=self.callback, bouncetime=100)    
+            switch = self.switch4
+            if self.switch4 > 0:
+                GPIO.add_event_detect(self.switch4, GPIO.FALLING, \
+                    callback=self.callback, bouncetime=100)
+        except Exception as e:
+                return
+
+    # Get switch state
+    def get(self):
+        value = 0
+            
+        if not GPIO.input(self.switch1): 
+            value = "1"
+        else:
+            value = "0"
+        if not GPIO.input(self.switch2): 
+            value = value + "1"
+        else:
+            value = value + "0"
+        if not GPIO.input(self.switch3): 
+            value = value + "1"
+        else:
+            value = value + "0"
+        if not GPIO.input(self.switch4): 
+            value = value + "1"
+        else:
+            value = value + "0"
+        return int(value, 2)
+
+if __name__ == "__main__":
+    
+    GPIO.setmode(GPIO.BCM)
+    #*****************************
+    #Set Nixie Tubes
+    DIN_PIN = 23
+    EN_PIN = 24
+    CLK_PIN = 25
+
+    #Declare display array
+    nixieDisplayArray = [False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False, False]
+
+    nixie1 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    nixie2 = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+
+    dot1 = 20
+    dot2 = 21
+
+    GPIO.setup(DIN_PIN, GPIO.OUT)
+    GPIO.setup(EN_PIN, GPIO.OUT)
+    GPIO.setup(CLK_PIN, GPIO.OUT)
+
+    GPIO.output(DIN_PIN, False)
+    GPIO.output(EN_PIN, False)
+    GPIO.output(CLK_PIN, False)
+    #*************************
+    
+    #*************************
+    #write binary set up
+    GPIO.setup(17, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+    GPIO.setup(27, GPIO.OUT)
+    #*************************
+
+    def write1sAnd0s(binaryValue): #write rand binary to text file
+        writeValue = str.encode(binaryValue)
+        f=open("randombinary","ab")
+        f.write(writeValue)
+        f.close()
+        
+    def NixieDisplay(digit1, digit2):  
+        #adjust pin mapping so the number sent to this function matches output
+        if digit1 == 0:
+            digit1 = 9
+        else:
+            digit1 = digit1 - 1
+            
+        if digit2 == 0:
+            digit2 = 9
+        else:
+            digit2 = digit2 - 1
+            
+        digit1 = nixie1[digit1]
+        digit2 = nixie2[digit2]
+        
+        i = 23
+        while i >=0:
+            if i != dot1 or i != dot2:
+                nixieDisplayArray[i] = False
+            i = i - 1
+            
+        nixieDisplayArray[digit1] = True
+        nixieDisplayArray[digit2] = True
+        
+        ShiftOutData()
+        
+    def SetDot(dotNumber, dotState):
+        if dotNumber == 1:
+            if dotState == True:
+                nixieDisplayArray[dot1] = True
+            else:
+                nixieDisplayArray[dot1] = False
+                
+        if dotNumber == 2:
+            if dotState == True:
+                nixieDisplayArray[dot2] = True
+            else:
+                nixieDisplayArray[dot2] = False
+                
+        ShiftOutData()
+        
+    def ShiftOutData():
+        GPIO.output(DIN_PIN, False)
+        GPIO.output(EN_PIN, False)
+        GPIO.output(CLK_PIN, False)
+        
+        i = 23
+        while i >=0:
+            GPIO.output(DIN_PIN, nixieDisplayArray[i])
+            GPIO.output(CLK_PIN, True)
+            GPIO.output(CLK_PIN, False)
+            i = i - 1
+            
+        GPIO.output(EN_PIN, True)    
+           
+        GPIO.output(CLK_PIN, False)
+
+    def GenRandNum(times, dSize):
+        t = 0 #Set total to zero
+        while times > 0:
+            #Set file path
+            fPath = os.getcwd() + '/randombinary'
+
+            #Guess length of binary digits to grab
+            if dSize == 2:
+                lengthGuess = 2
+            else:
+                lengthGuess = math.ceil(math.log2(dSize))
+
+            #set n to 1 more than dSize so loop runs
+            n = dSize + 1
+            while n > dSize or n <= 0:
+                #Open binary file and get last few digits
+                with open(fPath, "rb+") as f:
+                    f.seek(0, os.SEEK_END)
+                    f.seek(f.tell() - lengthGuess, 0)
+                    randNumb = f.read()
+        
+                    #Remove the bits from the end of the file
+                    f.seek(- lengthGuess, os.SEEK_END)
+                    f.truncate()
+                    
+                    #set n to result. If n is greater than max size or zero then try again
+                    n = int(randNumb,2)
+                f.close()
+            t = t + n
+            times = times - 1
+        return t
+    #switch_value = 0
+    
+    def show_results(t):
+        c = 0
+        while c < 30: #Spin "random" numbers
+            NixieDisplay(random.randint(0,9),random.randint(0,9))
+            c = c + 1
+            time.sleep(0.01)
+            
+        if t == 100:
+            NixieDisplay(0,0)
+        elif t < 10:
+            t = str(t)
+            NixieDisplay(0,int(t[0]))
+        elif t > 100:
+            NixieDisplay(0,0)      
+        else:
+            t = str(t)
+            NixieDisplay(int(t[0]),int(t[1])) 
+
+    
+    # Callback routine
+    def rotary_switch_event(switch):
+        global switch_value
+        time.sleep(0.1)
+        value = rotary_switch.get()
+        if value != switch_value:
+            switch_value = value
+        return
+    
+    #Handle Roll Combos
+    def XDX(LS, RS):
+        if RS == 1: #Xd2
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 2))
+            
+        elif RS == 2: #Xd3
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 3))
+            
+        elif RS == 3: #Xd4
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 4))
+            
+        elif RS == 4: #Xd6
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 6))
+            
+        elif RS == 5: #xd8
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 8))
+            
+        elif RS == 6: #xd10
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 10))
+                
+        elif RS == 7: #Xd12
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 12))
+                
+        elif RS == 8: #Xd20
+            #print(LS, " ", RS)
+            show_results(GenRandNum(LS, 20))
+               
+        elif RS == 9: #Precentile Die
+            show_results(GenRandNum(1, 100))
+        
+        elif RS == 10: #Advantage Die
+            adv = [GenRandNum(1, 20), GenRandNum(1, 20)]
+            adv.sort(reverse = True)
+            show_results(adv[0])
+        
+        elif RS == 11: #Disadvantage
+            dis = [GenRandNum(1, 20), GenRandNum(1, 20)]
+            dis.sort()
+            show_results(dis[0])
+            
+        elif RS == 12: #Stat Roll
+            stat = [GenRandNum(1, 6), GenRandNum(1, 6), GenRandNum(1, 6), GenRandNum(1, 6)]
+            stat.sort(reverse = True)
+            stat_sum = stat[0] + stat[1] + stat[2]
+            show_results(stat_sum)
+
+    rotary_switch = RotarySwitch(21,20,16,12,rotary_switch_event)
+    switch_value = rotary_switch.get()
+    
+    #Set Button Push var (BP) to a value to tell if switch changes
+    if GPIO.input(4) == GPIO.HIGH:
+        BP = "HIGH"
+    else:
+        BP = "LOW"
+
+    while True:
+        #time.sleep(0.1)
+        if (GPIO.input(4) == GPIO.HIGH) and (BP == "LOW"):
+            rotary_switch = RotarySwitch(21,20,16,12,rotary_switch_event)
+            LeftSwitch = rotary_switch.get()
+            rotary_switch = RotarySwitch(19,13,6,5,rotary_switch_event)
+            RightSwitch = rotary_switch.get()
+            
+            #Send switch states to randomizer
+            XDX(LeftSwitch, RightSwitch)
+            
+            #Used in if-statement to account for the wrong switch I bought
+            BP = "HIGH"
+        
+        if (GPIO.input(4) == GPIO.LOW) and (BP == "HIGH"):
+            rotary_switch = RotarySwitch(21,20,16,12,rotary_switch_event)
+            LeftSwitch = rotary_switch.get()
+            rotary_switch = RotarySwitch(19,13,6,5,rotary_switch_event)
+            RightSwitch = rotary_switch.get()
+            
+            #Send switch states to randomizer
+            XDX(LeftSwitch, RightSwitch)
+            
+            #Used in if-statement to account for the wrong switch I bought
+            BP = "LOW"
+            
+        #Write binary and ping the AMP meter
+        if GPIO.input(17) == GPIO.HIGH:
+            timeOfPing = int(round(time.time()*10000)) 
+            if timeOfPing % 2 == 0:
+                #print(0, " ", timeOfPing)
+                write1sAnd0s("0")
+                sleep(0.1)
+            else:
+                #print(1, " ", timeOfPing)
+                write1sAnd0s("1")
+                sleep(0.1)
+                
+        #Pulse the AMP meter
+        GPIO.output(27, True)
+        GPIO.output(27, False)
+                
