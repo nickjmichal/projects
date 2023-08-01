@@ -44,7 +44,7 @@ DECLARE @PositiveClaims TABLE
 	PAYMENT_GROUP_ID BIGINT		
 )
 	
-DECLARE @Pharmacies TABLE 
+DECLARE @pharm TABLE 
 (
 	PHARM_ID INT,
 	BAL_START_DATE DATE,
@@ -55,7 +55,7 @@ DECLARE @Pharmacies TABLE
 )
 
 
-INSERT INTO @Pharmacies
+INSERT INTO @pharm
 (
 	PHARM_ID,
 	BAL_START_DATE,
@@ -74,7 +74,7 @@ INSERT INTO @Pharmacies
 			PHARM_ID,
 			SUM(ORIG_BAL_AMNT) AS Balance,		
 			BALANCE_DATE AS BalanceDate
-		FROM Rx_ClaimsRecon.dbo.NegativeTracker1209 WITH(NOLOCK)
+		FROM claims.dbo.NegativeTracker1209 WITH(NOLOCK)
 		WHERE BALANCE_DATE<=@CycleDate
 		GROUP BY PHARM_ID,BALANCE_DATE
 	) A
@@ -84,7 +84,7 @@ INSERT INTO @Pharmacies
 			PHARM_ID,
 			SUM(AMOUNT) AS LinkerSum,
 			NEG_BAL_DATE
-		FROM Rx_ClaimsRecon.dbo.PositiveNegativeLinker1209 WITH(NOLOCK) 
+		FROM claims.dbo.pnLink WITH(NOLOCK) 
 		WHERE POS_BAL_DATE <= @CycleDate
 		GROUP BY PHARM_ID,NEG_BAL_DATE
 	) B 
@@ -116,8 +116,8 @@ SELECT
 	A.BAL_START_DATE,
 	A.CLAIMS_START_DATE,
 	0 
-FROM @Pharmacies A 
-JOIN Rx_ClaimsRecon.dbo.PositiveNegativeLinker1209 B WITH(NOLOCK)
+FROM @pharm A 
+JOIN claims.dbo.pnLink B WITH(NOLOCK)
 ON A.PHARM_ID = B.PHARM_ID
 WHERE B.POS_BAL_DATE >= A.CLAIMS_START_DATE 
 AND B.NEG_BAL_DATE < A.CLAIMS_START_DATE
@@ -137,7 +137,7 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 	WHERE IS_PROCESSED = 0 
 	ORDER BY PHARM_ID ASC
 	
-	WHILE EXISTS(SELECT 1 FROM Rx_ClaimsRecon.dbo.PositiveNegativeLinker1209 B 
+	WHILE EXISTS(SELECT 1 FROM claims.dbo.pnLink B 
 					WHERE PHARM_ID = @CurrPharmID 
 					AND B.POS_BAL_DATE >= @CurrClaimStartDate
 					AND B.NEG_BAL_DATE < @CurrClaimStartDate 
@@ -152,8 +152,8 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 					SELECT DISTINCT 
 						A.PHARM_ID,
 						MIN(B.NEG_BAL_DATE) AS 'OrigBalDate' 
-					FROM @Pharmacies A 
-					JOIN Rx_ClaimsRecon.dbo.PositiveNegativeLinker1209 B 
+					FROM @pharm A 
+					JOIN claims.dbo.pnLink B 
 					ON A.PHARM_ID = B.PHARM_ID 
 					AND B.POS_BAL_DATE >= @CurrClaimStartDate 
 					AND B.NEG_BAL_DATE < @CurrClaimStartDate
@@ -171,7 +171,7 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 		SET IS_PROCESSED = 1 
 		WHERE PHARM_ID = @CurrPharmID
 		
-		UPDATE @Pharmacies 
+		UPDATE @pharm 
 		SET CLAIMS_START_DATE = @CurrClaimStartDate 
 		WHERE PHARM_ID = @CurrPharmID
 
@@ -182,7 +182,7 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 	UPDATE A
 	SET 
 	A.PARTIAL_COLLECTION = PD.PartialCollection
-	FROM @Pharmacies A
+	FROM @pharm A
 	 JOIN
 	(	
 		SELECT 
@@ -194,8 +194,8 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 				A.PHARM_ID,
 				BALANCE_dATE,
 				SUM(ORIG_BAL_AMNT) AS PositiveAmount
-			FROM Rx_ClaimsRecon.dbo.PositiveTracker1209 A WITH(NOLOCK)
-			JOIN @Pharmacies F ON A.PHARM_ID = F.PHARM_ID
+			FROM claims.dbo.PositiveTracker1209 A WITH(NOLOCK)
+			JOIN @pharm F ON A.PHARM_ID = F.PHARM_ID
 			WHERE BALANCE_DATE <= @CycleDate 
 			AND A.BALANCE_DATE >= F.CLAIMS_START_DATE
 			GROUP BY A.PHARM_ID,BALANCE_DATE
@@ -206,7 +206,7 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 				PHARM_ID,
 				POS_BAL_DATE,
 				SUM(AMOUNT) AS LinkerSum
-			FROM Rx_ClaimsRecon.dbo.PositiveNegativeLinker1209 WITH(NOLOCK)
+			FROM claims.dbo.pnLink WITH(NOLOCK)
 			WHERE POS_BAL_DATE <= @CycleDate
 			GROUP BY PHARM_ID,POS_BAL_DATE
 		) B
@@ -217,7 +217,7 @@ WHILE EXISTS(SELECT 1 FROM @ClaimCyclePharmacy
 	ON A.PHARM_ID=PD.PHARM_ID
 
 
-DECLARE @PharmaciesResult TABLE
+DECLARE @pharmResult TABLE
 (
 	[PHARM_ID] [int] NULL,
 	[NegativeBalanceDate] [date] NULL,
@@ -228,7 +228,7 @@ DECLARE @PharmaciesResult TABLE
 	IS_PROCESSED BIT DEFAULT(0)
 )
 
-INSERT @PharmaciesResult
+INSERT @pharmResult
 SELECT 
 	PHARM_ID,
 	CONVERT(VARCHAR,BAL_START_DATE,101) AS NegativeBalanceDate,
@@ -237,17 +237,17 @@ SELECT
 	(NEGATIVE_BAL + ISNULL(PARTIAL_COLLECTION,0))  AS NetBalance,
 	CONVERT(VARCHAR,CLAIMS_START_DATE,101) AS ClaimsStartDate,
 	0
-FROM @Pharmacies	
+FROM @pharm	
 		
 WHILE EXISTS(SELECT 1 
-					FROM @PharmaciesResult 
+					FROM @pharmResult 
 					WHERE IS_PROCESSED=0)
 		BEGIN
 
 			SELECT TOP 1 
 				@PharmId=PHARM_ID,
 				@PharBalStartDate = ClaimsStartDate	
-			FROM @PharmaciesResult 
+			FROM @pharmResult 
 			WHERE IS_PROCESSED=0
 			
 			DELETE FROM @NegativeClaims
@@ -268,8 +268,8 @@ WHILE EXISTS(SELECT 1
 				C.PROCESS_DATE,
 				C.FIN_CUTOFF_DATE,
 				C.PAYMENT_GROUP_ID
-			FROM Rx_ClaimsRecon.dbo.OutstandingClaims C WITH(NOLOCK)
-			JOIN Rx_ClaimsRecon.dbo.BalanceType B WITH(NOLOCK)
+			FROM claims.dbo.OutstandingClaims C WITH(NOLOCK)
+			JOIN claims.dbo.BalanceType B WITH(NOLOCK)
 			ON C.BALANCE_TYPE_ID=B.BalTypeID
 			WHERE C.PHARM_ID = @PharmId	
 			AND C.REMAINING_BALANCE<0
@@ -299,8 +299,8 @@ WHILE EXISTS(SELECT 1
 				C.FIN_CUTOFF_DATE,
 				C.PROCESS_DATE,
 				C.PAYMENT_GROUP_ID
-			FROM Rx_ClaimsRecon.dbo.OutstandingClaims C WITH(NOLOCK)		
-			JOIN Rx_ClaimsRecon.dbo.BalanceType B WITH(NOLOCK)
+			FROM claims.dbo.OutstandingClaims C WITH(NOLOCK)		
+			JOIN claims.dbo.BalanceType B WITH(NOLOCK)
 			ON C.BALANCE_TYPE_ID=B.BalTypeID
 			WHERE C.REMAINING_BALANCE>0
 			AND C.PHARM_ID = @PharmId  
@@ -394,7 +394,7 @@ WHILE EXISTS(SELECT 1
 						
 				END
 		
-		UPDATE @PharmaciesResult 
+		UPDATE @pharmResult 
 		SET IS_PROCESSED = 1 
 		WHERE PHARM_ID = @PharmId 
 
@@ -453,18 +453,18 @@ WHILE EXISTS(SELECT 1
 				CAST(-(ABS(PHAR_TOTAL_PAID_AMT)-(ISNULL(D.PositiveApplied,0)+ISNULL(T.PARTIAL_COLLECTION,0)))  AS VARCHAR(20))			 
 		END AS RemainingAmount,
 		C.PHARM_ID
-	FROM Rx_ClaimsRecon.dbo.OutstandingClaims C WITH(NOLOCK)
-	JOIN @PharmaciesResult PH
+	FROM claims.dbo.OutstandingClaims C WITH(NOLOCK)
+	JOIN @pharmResult PH
 	ON C.PHARM_ID=PH.PHARM_ID
 	AND C.FIN_CUTOFF_DATE>=PH.ClaimsStartDate
-	JOIN Rx_ClaimsRecon.dbo.BalanceType B
+	JOIN claims.dbo.BalanceType B
 	ON C.BALANCE_TYPE_ID=B.BalTypeID	
 	LEFT JOIN
 	(
 		SELECT 
 			NEGATIVE_ID,
 			SUM(TRANS_AMOUNT) AS PositiveApplied
-		FROM Rx_ClaimsRecon.dbo.ClaimTracker WITH(NOLOCK)	
+		FROM claims.dbo.ClaimTracker WITH(NOLOCK)	
 		WHERE (CYCLE_DATE<=@CycleDate)
 		GROUP BY NEGATIVE_ID
 	) D
@@ -474,7 +474,7 @@ WHILE EXISTS(SELECT 1
 		SELECT 
 			POSITIVE_ID,
 			SUM(TRANS_AMOUNT) AS PositiveApplied
-		FROM Rx_ClaimsRecon.dbo.ClaimTracker WITH(NOLOCK)	
+		FROM claims.dbo.ClaimTracker WITH(NOLOCK)	
 		WHERE (CYCLE_DATE<=@CycleDate)
 		GROUP BY POSITIVE_ID
 	) P
